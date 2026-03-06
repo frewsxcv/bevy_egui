@@ -3,7 +3,7 @@ use bevy_egui::{
     EguiContext, EguiContexts, EguiGlobalSettings, EguiMultipassSchedule, EguiPlugin,
     EguiPrimaryContextPass, PrimaryEguiContext, egui,
 };
-use wgpu_types::BlendState;
+use wgpu::BlendState;
 
 fn main() {
     let mut app = App::new();

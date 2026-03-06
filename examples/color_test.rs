@@ -303,7 +303,7 @@ use egui::{
     widgets::color_picker::show_color,
 };
 use std::collections::HashMap;
-use wgpu_types::{Extent3d, TextureUsages};
+use wgpu::{Extent3d, TextureUsages};
 
 const GRADIENT_SIZE: Vec2 = vec2(256.0, 18.0);
 

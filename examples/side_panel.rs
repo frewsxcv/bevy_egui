@@ -7,7 +7,7 @@ use bevy_egui::{
     EguiContext, EguiContexts, EguiGlobalSettings, EguiPlugin, EguiPrimaryContextPass,
     PrimaryEguiContext, egui,
 };
-use wgpu_types::BlendState;
+use wgpu::BlendState;
 
 fn main() {
     App::new()

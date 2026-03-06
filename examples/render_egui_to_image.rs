@@ -5,7 +5,7 @@ use bevy_egui::{
     EguiMultipassSchedule, EguiPlugin, EguiPrimaryContextPass, PrimaryEguiContext,
     picking::PickableEguiContext,
 };
-use wgpu_types::{Extent3d, TextureUsages};
+use wgpu::{Extent3d, TextureUsages};
 
 fn main() {
     let mut app = App::new();

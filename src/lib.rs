@@ -160,7 +160,7 @@ use crate::text_agent::{
 use arboard::Clipboard;
 use bevy_app::prelude::*;
 #[cfg(feature = "render")]
-use bevy_asset::{AssetEvent, AssetId, Assets, Handle, load_internal_asset};
+use bevy_asset::{AssetEvent, AssetId, Handle};
 #[cfg(feature = "picking")]
 use bevy_camera::NormalizedRenderTarget;
 use bevy_derive::{Deref, DerefMut};
@@ -173,7 +173,7 @@ use bevy_ecs::{
     world::DeferredWorld,
 };
 #[cfg(feature = "render")]
-use bevy_image::{Image, ImageSampler};
+use bevy_image::Image;
 use bevy_input::InputSystems;
 #[allow(unused_imports)]
 use bevy_log as log;
@@ -188,9 +188,8 @@ use bevy_platform::collections::HashSet;
 use bevy_reflect::Reflect;
 #[cfg(feature = "render")]
 use bevy_render::{
-    ExtractSchedule, Render, RenderApp, RenderSystems,
+    ExtractSchedule, RenderApp,
     extract_resource::{ExtractResource, ExtractResourcePlugin},
-    render_resource::SpecializedRenderPipelines,
 };
 use output::process_output_system;
 #[cfg(all(
@@ -342,13 +341,6 @@ pub struct EguiPlugin {
     #[cfg(feature = "bevy_ui")]
     pub ui_render_order: UiRenderOrder,
 
-    /// Configure if bindless mode for rendering can be used on devices that has support for it.
-    ///
-    /// It is useful in cases where multiple textures are used to render UI
-    /// and renderer needs to frequently switch between different textures.
-    /// This avoids the cost of frequently changing bind groups.
-    #[cfg(feature = "render")]
-    pub bindless_mode_array_size: Option<std::num::NonZero<u32>>,
 }
 
 impl Default for EguiPlugin {
@@ -358,8 +350,6 @@ impl Default for EguiPlugin {
             enable_multipass_for_primary_context: true,
             #[cfg(feature = "bevy_ui")]
             ui_render_order: UiRenderOrder::EguiAboveBevyUi,
-            #[cfg(feature = "render")]
-            bindless_mode_array_size: std::num::NonZero::new(16),
         }
     }
 }
@@ -787,7 +777,6 @@ impl EguiContexts<'_, '_> {
     ///
     /// You may want to pass a weak handle if you control removing texture assets in your
     /// application manually and don't want to bother with cleaning up textures in Egui.
-    /// (The cleanup happens in [`free_egui_textures_system`].)
     ///
     /// You'll want to pass a strong handle if a texture is used only in Egui and there are no
     /// handle copies stored anywhere else.
@@ -987,12 +976,8 @@ impl Plugin for EguiPlugin {
 
         #[cfg(feature = "render")]
         {
-            app.init_resource::<EguiManagedTextures>();
             app.init_resource::<EguiUserTextures>();
             app.add_plugins(ExtractResourcePlugin::<EguiUserTextures>::default());
-            app.add_plugins(ExtractResourcePlugin::<
-                render::systems::ExtractedEguiManagedTextures,
-            >::default());
         }
 
         #[cfg(target_arch = "wasm32")]
@@ -1237,33 +1222,10 @@ impl Plugin for EguiPlugin {
         app.insert_resource(crate::EguiPickingOrder(0.6));
 
         #[cfg(feature = "render")]
-        app.add_systems(
-            PostUpdate,
-            update_egui_textures_system.in_set(EguiPostUpdateSet::PostProcessOutput),
-        )
-        .add_systems(
-            Render,
-            render::systems::prepare_egui_transforms_system.in_set(RenderSystems::Prepare),
-        )
-        .add_systems(
-            Render,
-            render::systems::queue_bind_groups_system.in_set(RenderSystems::Queue),
-        )
-        .add_systems(
-            Render,
-            render::systems::queue_pipelines_system.in_set(RenderSystems::Queue),
-        )
-        .add_systems(Last, free_egui_textures_system);
+        app.add_systems(Last, free_egui_textures_system);
 
         #[cfg(feature = "render")]
         {
-            load_internal_asset!(
-                app,
-                render::EGUI_SHADER_HANDLE,
-                "render/egui.wgsl",
-                bevy_shader::Shader::from_wgsl
-            );
-
             let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
                 return;
             };
@@ -1332,37 +1294,10 @@ impl Plugin for EguiPlugin {
         let bevy_ui_is_enabled = app.is_plugin_added::<bevy_ui_render::UiRenderPlugin>();
 
         if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
-            render_app
-                .insert_resource(render::EguiRenderSettings {
-                    bindless_mode_array_size: self.bindless_mode_array_size,
-                })
-                .init_resource::<render::EguiPipeline>()
-                .init_resource::<SpecializedRenderPipelines<render::EguiPipeline>>()
-                .init_resource::<render::systems::EguiTransforms>()
-                .init_resource::<render::systems::EguiRenderData>()
-                .add_systems(
-                    // Seems to be just the set to add/remove nodes, as it'll run before
-                    // `RenderSystems::ExtractCommands` where render nodes get updated.
-                    ExtractSchedule,
-                    render::extract_egui_camera_view_system,
-                )
-                .add_systems(
-                    Render,
-                    render::systems::prepare_egui_transforms_system.in_set(RenderSystems::Prepare),
-                )
-                .add_systems(
-                    Render,
-                    render::systems::prepare_egui_render_target_data_system
-                        .in_set(RenderSystems::Prepare),
-                )
-                .add_systems(
-                    Render,
-                    render::systems::queue_bind_groups_system.in_set(RenderSystems::Queue),
-                )
-                .add_systems(
-                    Render,
-                    render::systems::queue_pipelines_system.in_set(RenderSystems::Queue),
-                );
+            render_app.add_systems(
+                ExtractSchedule,
+                render::extract_egui_camera_view_system,
+            );
 
             // Configure a fixed rendering order between Bevy UI and egui.
             // Otherwise, this order is effectively decided at random on every game startup.
@@ -1427,19 +1362,6 @@ fn input_system_is_enabled(
     move |settings| test(&settings.input_system_settings)
 }
 
-/// Contains textures allocated and painted by Egui.
-#[cfg(feature = "render")]
-#[derive(Resource, Deref, DerefMut, Default)]
-pub struct EguiManagedTextures(pub HashMap<(Entity, u64), EguiManagedTexture>);
-
-/// Represents a texture allocated and painted by Egui.
-#[cfg(feature = "render")]
-pub struct EguiManagedTexture {
-    /// Assets store handle.
-    pub handle: Handle<Image>,
-    /// Stored in full so we can do partial updates (which bevy doesn't support).
-    pub color_image: egui::ColorImage,
-}
 
 /// Adds bevy_egui components to a first found camera assuming it's a primary one.
 ///
@@ -1651,100 +1573,16 @@ pub fn capture_pointer_input_system(
     }
 }
 
-/// Updates textures painted by Egui.
-#[cfg(feature = "render")]
-pub fn update_egui_textures_system(
-    mut egui_render_output: Query<(Entity, &EguiRenderOutput)>,
-    mut egui_managed_textures: ResMut<EguiManagedTextures>,
-    mut image_assets: ResMut<Assets<Image>>,
-) {
-    use bevy_image::TextureAccessError;
 
-    for (entity, egui_render_output) in egui_render_output.iter_mut() {
-        for (texture_id, image_delta) in &egui_render_output.textures_delta.set {
-            let color_image = render::as_color_image(&image_delta.image);
-
-            let texture_id = match texture_id {
-                egui::TextureId::Managed(texture_id) => *texture_id,
-                egui::TextureId::User(_) => continue,
-            };
-
-            let sampler = ImageSampler::Descriptor(render::texture_options_as_sampler_descriptor(
-                &image_delta.options,
-            ));
-            if let Some(pos) = image_delta.pos {
-                // Partial update.
-                if let Some(managed_texture) = egui_managed_textures.get_mut(&(entity, texture_id))
-                    && let Some(image) = image_assets.get_mut(managed_texture.handle.id())
-                {
-                    if update_image_rect(image, pos, &color_image).is_err() {
-                        log::error!(
-                            "Failed to write into texture (id: {:?}) for partial update",
-                            texture_id
-                        );
-                    }
-                } else {
-                    log::warn!("Partial update of a missing texture (id: {:?})", texture_id);
-                }
-            } else {
-                // Full update.
-                let image = render::color_image_as_bevy_image(&color_image, sampler);
-                let handle = image_assets.add(image);
-                egui_managed_textures.insert(
-                    (entity, texture_id),
-                    EguiManagedTexture {
-                        handle,
-                        color_image,
-                    },
-                );
-            }
-        }
-    }
-
-    fn update_image_rect(
-        dest: &mut Image,
-        [x, y]: [usize; 2],
-        src: &egui::ColorImage,
-    ) -> Result<(), TextureAccessError> {
-        for sy in 0..src.height() {
-            for sx in 0..src.width() {
-                let px = src[(sx, sy)];
-
-                dest.set_color_at(
-                    (x + sx) as u32,
-                    (y + sy) as u32,
-                    bevy_color::Color::srgba_u8(px.r(), px.g(), px.b(), px.a()),
-                )?;
-            }
-        }
-
-        Ok(())
-    }
-}
-
-/// This system is responsible for deleting image assets of freed Egui-managed textures and deleting Egui user textures of removed Bevy image assets.
+/// This system is responsible for deleting Egui user textures of removed Bevy image assets.
 ///
 /// If you add textures via [`EguiContexts::add_image`] or [`EguiUserTextures::add_image`] by passing a weak handle,
-/// the systems ensures that corresponding Egui textures are cleaned up as well.
+/// the system ensures that corresponding Egui textures are cleaned up as well.
 #[cfg(feature = "render")]
 pub fn free_egui_textures_system(
     mut egui_user_textures: ResMut<EguiUserTextures>,
-    egui_render_output: Query<(Entity, &EguiRenderOutput)>,
-    mut egui_managed_textures: ResMut<EguiManagedTextures>,
-    mut image_assets: ResMut<Assets<Image>>,
     mut image_event_reader: MessageReader<AssetEvent<Image>>,
 ) {
-    for (entity, egui_render_output) in egui_render_output.iter() {
-        for &texture_id in &egui_render_output.textures_delta.free {
-            if let egui::TextureId::Managed(texture_id) = texture_id {
-                let managed_texture = egui_managed_textures.remove(&(entity, texture_id));
-                if let Some(managed_texture) = managed_texture {
-                    image_assets.remove(&managed_texture.handle);
-                }
-            }
-        }
-    }
-
     for message in image_event_reader.read() {
         if let AssetEvent::Removed { id } = message {
             egui_user_textures.remove_image(EguiTextureHandle::Weak(*id));

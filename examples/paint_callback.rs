@@ -17,11 +17,10 @@ use bevy_camera::RenderTarget;
 use bevy_egui::{
     EguiContexts, EguiGlobalSettings, EguiMultipassSchedule, EguiPlugin, EguiPrimaryContextPass,
     PrimaryEguiContext,
-    render::{EguiBevyPaintCallback, EguiBevyPaintCallbackImpl, EguiPipelineKey},
+    render::{EguiBevyPaintCallback, EguiBevyPaintCallbackImpl},
 };
-use bevy_render::view::ViewTarget;
 use std::path::Path;
-use wgpu_types::{Extent3d, TextureFormat, TextureUsages};
+use wgpu::TextureFormat;
 
 fn main() {
     App::new()
@@ -60,7 +59,7 @@ impl EguiBevyPaintCallbackImpl for CustomPaintCallback {
         &self,
         _info: egui::PaintCallbackInfo,
         render_entity: RenderEntity,
-        key: EguiPipelineKey,
+        texture_format: TextureFormat,
         world: &mut World,
     ) {
         let pipeline_id =
@@ -75,7 +74,7 @@ impl EguiBevyPaintCallbackImpl for CustomPaintCallback {
                     let pipeline_id = specialized_custom_pipelines.specialize(
                         pipeline_cache,
                         specialized_pipeline,
-                        key,
+                        texture_format,
                     );
 
                     world
@@ -89,13 +88,13 @@ impl EguiBevyPaintCallbackImpl for CustomPaintCallback {
         pipeline_cache.block_on_render_pipeline(pipeline_id);
     }
 
-    fn render<'pass>(
+    fn render(
         &self,
         _info: egui::PaintCallbackInfo,
-        render_pass: &mut bevy::render::render_phase::TrackedRenderPass<'pass>,
+        render_pass: &mut wgpu::RenderPass<'static>,
         render_entity: RenderEntity,
-        _key: EguiPipelineKey,
-        world: &'pass World,
+        _texture_format: TextureFormat,
+        world: &World,
     ) {
         let Some(pipeline) = world
             .get_entity(render_entity.id())
@@ -110,7 +109,7 @@ impl EguiBevyPaintCallbackImpl for CustomPaintCallback {
             return;
         };
 
-        render_pass.set_render_pipeline(pipeline);
+        render_pass.set_pipeline(pipeline);
         render_pass.draw(0..3, 0..1);
     }
 }
@@ -132,7 +131,7 @@ impl FromWorld for CustomPipeline {
 }
 
 impl SpecializedRenderPipeline for CustomPipeline {
-    type Key = EguiPipelineKey;
+    type Key = TextureFormat;
 
     fn specialize(&self, key: Self::Key) -> RenderPipelineDescriptor {
         RenderPipelineDescriptor {
@@ -161,11 +160,7 @@ impl SpecializedRenderPipeline for CustomPipeline {
                 shader_defs: vec![],
                 entry_point: Some("fragment".into()),
                 targets: vec![Some(ColorTargetState {
-                    format: if key.hdr {
-                        ViewTarget::TEXTURE_FORMAT_HDR
-                    } else {
-                        TextureFormat::bevy_default()
-                    },
+                    format: key,
                     blend: Some(BlendState::ALPHA_BLENDING),
                     write_mask: ColorWrites::ALL,
                 })],
@@ -213,7 +208,7 @@ fn setup_worldspace_system(
     mut commands: Commands,
 ) {
     let output_texture = images.add({
-        let size = Extent3d {
+        let size = wgpu::Extent3d {
             width: 256,
             height: 256,
             depth_or_array_layers: 1,
@@ -223,7 +218,7 @@ fn setup_worldspace_system(
             data: Some(vec![0; (size.width * size.height * 4) as usize]),
             ..default()
         };
-        output_texture.texture_descriptor.usage |= TextureUsages::RENDER_ATTACHMENT;
+        output_texture.texture_descriptor.usage |= wgpu::TextureUsages::RENDER_ATTACHMENT;
         output_texture.texture_descriptor.size = size;
         output_texture
     });
