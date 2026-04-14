@@ -248,7 +248,7 @@ impl Node for EguiPassNode {
             render_context.add_command_buffer(cmd_buf);
         }
 
-        // 5. Render all egui meshes in one pass.
+        // 4. Render all egui meshes in one pass.
         {
             let color_attachment = target.get_unsampled_color_attachment();
             let render_pass =
@@ -265,7 +265,7 @@ impl Node for EguiPassNode {
             renderer.render(&mut render_pass, &mesh_jobs, &screen_descriptor);
         }
 
-        // 6. Handle Bevy paint callbacks in separate passes. Iterate the original
+        // 5. Handle Bevy paint callbacks in separate passes. Iterate the original
         // render_output.paint_jobs directly — callbacks don't need the User-id remap
         // that mesh_jobs got, so there's no need to clone them.
         for clipped in &render_output.paint_jobs {
@@ -329,7 +329,7 @@ impl Node for EguiPassNode {
             }
         }
 
-        // 5. Free old textures.
+        // 6. Free old textures.
         for id in &render_output.textures_delta.free {
             renderer.free_texture(id);
         }
