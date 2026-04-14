@@ -2,10 +2,7 @@ use crate::{
     EguiRenderOutput, EguiUserTextures, RenderComputedScaleFactor,
     render::{EguiBevyPaintCallback, EguiViewTarget},
 };
-use bevy_ecs::{
-    query::QueryState,
-    world::World,
-};
+use bevy_ecs::{query::QueryState, world::World};
 use bevy_image::BevyDefault as _;
 use bevy_platform::collections::HashMap;
 use bevy_render::{
@@ -67,30 +64,31 @@ impl Node for EguiPassNode {
         let callback_updates: Vec<_> = self
             .egui_view_query
             .iter(world)
-            .flat_map(|(entity, _view, egui_view_target, render_output, scale_factor)| {
-                let Ok((_, camera)) =
-                    self.egui_view_target_query.get(world, egui_view_target.0)
-                else {
-                    return Vec::new();
-                };
+            .flat_map(
+                |(entity, _view, egui_view_target, render_output, scale_factor)| {
+                    let Ok((_, camera)) =
+                        self.egui_view_target_query.get(world, egui_view_target.0)
+                    else {
+                        return Vec::new();
+                    };
 
-                let texture_format = if camera.hdr {
-                    ViewTarget::TEXTURE_FORMAT_HDR
-                } else {
-                    TextureFormat::bevy_default()
-                };
+                    let texture_format = if camera.hdr {
+                        ViewTarget::TEXTURE_FORMAT_HDR
+                    } else {
+                        TextureFormat::bevy_default()
+                    };
 
-                let Some(target_size) = camera.physical_target_size else {
-                    return Vec::new();
-                };
+                    let Some(target_size) = camera.physical_target_size else {
+                        return Vec::new();
+                    };
 
-                render_output
-                    .paint_jobs
-                    .iter()
-                    .filter_map(|clipped| {
-                        if let egui::epaint::Primitive::Callback(cb) = &clipped.primitive {
-                            if let Ok(callback) =
-                                cb.callback.clone().downcast::<EguiBevyPaintCallback>()
+                    render_output
+                        .paint_jobs
+                        .iter()
+                        .filter_map(|clipped| {
+                            if let egui::epaint::Primitive::Callback(cb) = &clipped.primitive
+                                && let Ok(callback) =
+                                    cb.callback.clone().downcast::<EguiBevyPaintCallback>()
                             {
                                 let info = egui::PaintCallbackInfo {
                                     viewport: cb.rect,
@@ -100,21 +98,18 @@ impl Node for EguiPassNode {
                                 };
                                 return Some((info, callback, texture_format, entity));
                             }
-                        }
-                        None
-                    })
-                    .collect::<Vec<_>>()
-            })
+                            None
+                        })
+                        .collect::<Vec<_>>()
+                },
+            )
             .collect();
 
         // Process paint callback updates (mutable world access).
         for (info, callback, texture_format, entity) in callback_updates {
-            callback.cb().update(
-                info,
-                RenderEntity::from(entity),
-                texture_format,
-                world,
-            );
+            callback
+                .cb()
+                .update(info, RenderEntity::from(entity), texture_format, world);
         }
     }
 
@@ -132,8 +127,7 @@ impl Node for EguiPassNode {
             return Ok(());
         };
 
-        let Ok((target, camera)) =
-            self.egui_view_target_query.get_manual(world, view_target.0)
+        let Ok((target, camera)) = self.egui_view_target_query.get_manual(world, view_target.0)
         else {
             return Ok(());
         };
@@ -167,8 +161,7 @@ impl Node for EguiPassNode {
         let mut renderers = self.renderers.lock().unwrap();
         let mut user_texture_map = self.user_texture_map.lock().unwrap();
 
-        let renderer =
-            Self::get_or_create_renderer(&mut renderers, device, texture_format);
+        let renderer = Self::get_or_create_renderer(&mut renderers, device, texture_format);
 
         // 1. Process textures_delta - update/create managed textures.
         for (id, image_delta) in &render_output.textures_delta.set {
@@ -223,12 +216,11 @@ impl Node for EguiPassNode {
         // 3. Remap paint jobs: replace User(n) texture IDs with the egui-wgpu registered IDs.
         let mut paint_jobs = render_output.paint_jobs.clone();
         for clipped in &mut paint_jobs {
-            if let egui::epaint::Primitive::Mesh(mesh) = &mut clipped.primitive {
-                if let egui::TextureId::User(id) = mesh.texture_id {
-                    if let Some(mapped_id) = user_texture_map.get(&id) {
-                        mesh.texture_id = *mapped_id;
-                    }
-                }
+            if let egui::epaint::Primitive::Mesh(mesh) = &mut clipped.primitive
+                && let egui::TextureId::User(id) = mesh.texture_id
+                && let Some(mapped_id) = user_texture_map.get(&id)
+            {
+                mesh.texture_id = *mapped_id;
             }
         }
 
@@ -271,10 +263,28 @@ impl Node for EguiPassNode {
 
         // 6. Handle Bevy paint callbacks in separate passes.
         for clipped in &paint_jobs {
-            if let egui::epaint::Primitive::Callback(cb) = &clipped.primitive {
-                if let Ok(callback) =
-                    cb.callback.clone().downcast::<EguiBevyPaintCallback>()
-                {
+            if let egui::epaint::Primitive::Callback(cb) = &clipped.primitive
+                && let Ok(callback) = cb.callback.clone().downcast::<EguiBevyPaintCallback>()
+            {
+                let info = egui::PaintCallbackInfo {
+                    viewport: cb.rect,
+                    clip_rect: clipped.clip_rect,
+                    pixels_per_point,
+                    screen_size_px: [target_size.x, target_size.y],
+                };
+
+                let viewport = info.viewport_in_pixels();
+                if viewport.width_px > 0 && viewport.height_px > 0 {
+                    // prepare_render phase
+                    callback.cb().prepare_render(
+                        info,
+                        render_context,
+                        RenderEntity::from(input_view_entity),
+                        texture_format,
+                        world,
+                    );
+
+                    // Reconstruct info for the render phase.
                     let info = egui::PaintCallbackInfo {
                         viewport: cb.rect,
                         clip_rect: clipped.clip_rect,
@@ -282,53 +292,33 @@ impl Node for EguiPassNode {
                         screen_size_px: [target_size.x, target_size.y],
                     };
 
-                    let viewport = info.viewport_in_pixels();
-                    if viewport.width_px > 0 && viewport.height_px > 0 {
-                        // prepare_render phase
-                        callback.cb().prepare_render(
-                            info,
-                            render_context,
-                            RenderEntity::from(input_view_entity),
-                            texture_format,
-                            world,
-                        );
-
-                        // Reconstruct info for the render phase.
-                        let info = egui::PaintCallbackInfo {
-                            viewport: cb.rect,
-                            clip_rect: clipped.clip_rect,
-                            pixels_per_point,
-                            screen_size_px: [target_size.x, target_size.y],
-                        };
-
-                        // render phase
-                        let color_attachment = target.get_unsampled_color_attachment();
-                        let render_pass = render_context
-                            .command_encoder()
-                            .begin_render_pass(&wgpu::RenderPassDescriptor {
-                                label: Some("egui_paint_callback_pass"),
-                                color_attachments: &[Some(color_attachment)],
-                                depth_stencil_attachment: None,
-                                timestamp_writes: None,
-                                occlusion_query_set: None,
-                            });
-                        let mut render_pass = render_pass.forget_lifetime();
-                        render_pass.set_viewport(
-                            viewport.left_px as f32,
-                            viewport.top_px as f32,
-                            viewport.width_px as f32,
-                            viewport.height_px as f32,
-                            0.0,
-                            1.0,
-                        );
-                        callback.cb().render(
-                            info,
-                            &mut render_pass,
-                            RenderEntity::from(input_view_entity),
-                            texture_format,
-                            world,
-                        );
-                    }
+                    // render phase
+                    let color_attachment = target.get_unsampled_color_attachment();
+                    let render_pass = render_context.command_encoder().begin_render_pass(
+                        &wgpu::RenderPassDescriptor {
+                            label: Some("egui_paint_callback_pass"),
+                            color_attachments: &[Some(color_attachment)],
+                            depth_stencil_attachment: None,
+                            timestamp_writes: None,
+                            occlusion_query_set: None,
+                        },
+                    );
+                    let mut render_pass = render_pass.forget_lifetime();
+                    render_pass.set_viewport(
+                        viewport.left_px as f32,
+                        viewport.top_px as f32,
+                        viewport.width_px as f32,
+                        viewport.height_px as f32,
+                        0.0,
+                        1.0,
+                    );
+                    callback.cb().render(
+                        info,
+                        &mut render_pass,
+                        RenderEntity::from(input_view_entity),
+                        texture_format,
+                        world,
+                    );
                 }
             }
         }

@@ -340,7 +340,6 @@ pub struct EguiPlugin {
     /// to the same camera.
     #[cfg(feature = "bevy_ui")]
     pub ui_render_order: UiRenderOrder,
-
 }
 
 impl Default for EguiPlugin {
@@ -1294,10 +1293,7 @@ impl Plugin for EguiPlugin {
         let bevy_ui_is_enabled = app.is_plugin_added::<bevy_ui_render::UiRenderPlugin>();
 
         if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
-            render_app.add_systems(
-                ExtractSchedule,
-                render::extract_egui_camera_view_system,
-            );
+            render_app.add_systems(ExtractSchedule, render::extract_egui_camera_view_system);
 
             // Configure a fixed rendering order between Bevy UI and egui.
             // Otherwise, this order is effectively decided at random on every game startup.
@@ -1361,7 +1357,6 @@ fn input_system_is_enabled(
 ) -> impl Fn(Res<EguiGlobalSettings>) -> bool {
     move |settings| test(&settings.input_system_settings)
 }
-
 
 /// Adds bevy_egui components to a first found camera assuming it's a primary one.
 ///
@@ -1572,7 +1567,6 @@ pub fn capture_pointer_input_system(
         }
     }
 }
-
 
 /// This system is responsible for deleting Egui user textures of removed Bevy image assets.
 ///
