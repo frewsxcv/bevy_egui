@@ -213,23 +213,27 @@ impl Node for EguiPassNode {
             });
         }
 
-        // 3. Remap paint jobs: replace User(n) texture IDs with the egui-wgpu registered IDs.
-        let mut paint_jobs = render_output.paint_jobs.clone();
-        for clipped in &mut paint_jobs {
-            if let egui::epaint::Primitive::Mesh(mesh) = &mut clipped.primitive
-                && let egui::TextureId::User(id) = mesh.texture_id
-                && let Some(mapped_id) = user_texture_map.get(&id)
-            {
-                mesh.texture_id = *mapped_id;
-            }
-        }
-
-        // 4. Filter out Bevy paint callbacks — egui-wgpu doesn't know about them
-        // and would log warnings. Pass the same filtered list to both update_buffers and render.
-        let mesh_jobs: Vec<_> = paint_jobs
+        // 3. Build the mesh-only job list for egui-wgpu in a single pass: filter out
+        // Bevy paint callbacks (egui-wgpu doesn't know about them) and remap User(n)
+        // texture IDs to the egui-wgpu registered IDs at the same time. This avoids
+        // cloning the full paint_jobs vec and the extra filter-clone pass that the
+        // previous version did.
+        let mesh_jobs: Vec<egui::ClippedPrimitive> = render_output
+            .paint_jobs
             .iter()
-            .filter(|c| matches!(c.primitive, egui::epaint::Primitive::Mesh(_)))
-            .cloned()
+            .filter_map(|clipped| {
+                if !matches!(clipped.primitive, egui::epaint::Primitive::Mesh(_)) {
+                    return None;
+                }
+                let mut clipped = clipped.clone();
+                if let egui::epaint::Primitive::Mesh(mesh) = &mut clipped.primitive
+                    && let egui::TextureId::User(id) = mesh.texture_id
+                    && let Some(mapped_id) = user_texture_map.get(&id)
+                {
+                    mesh.texture_id = *mapped_id;
+                }
+                Some(clipped)
+            })
             .collect();
 
         let cmd_bufs = renderer.update_buffers(
@@ -261,8 +265,10 @@ impl Node for EguiPassNode {
             renderer.render(&mut render_pass, &mesh_jobs, &screen_descriptor);
         }
 
-        // 6. Handle Bevy paint callbacks in separate passes.
-        for clipped in &paint_jobs {
+        // 6. Handle Bevy paint callbacks in separate passes. Iterate the original
+        // render_output.paint_jobs directly — callbacks don't need the User-id remap
+        // that mesh_jobs got, so there's no need to clone them.
+        for clipped in &render_output.paint_jobs {
             if let egui::epaint::Primitive::Callback(cb) = &clipped.primitive
                 && let Ok(callback) = cb.callback.clone().downcast::<EguiBevyPaintCallback>()
             {
