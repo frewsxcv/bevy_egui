@@ -1537,12 +1537,13 @@ pub fn capture_pointer_input_system(
         .filter_map(|(i, p)| p.location.as_ref().map(|l| (i, l)))
     {
         if let NormalizedRenderTarget::Window(window) = location.target {
-            for window_context_entity in window_to_egui_context_map
+            let context_entities = window_to_egui_context_map
                 .window_to_contexts
                 .get(&window.entity())
-                .cloned()
-                .unwrap_or_default()
-            {
+                .into_iter()
+                .flatten()
+                .copied();
+            for window_context_entity in context_entities {
                 let Some((entity, mut ctx, settings, camera)) =
                     egui_context.get_some_mut(window_context_entity)
                 else {
